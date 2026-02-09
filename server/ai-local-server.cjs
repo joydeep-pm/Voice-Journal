@@ -13,12 +13,12 @@ const APP_AI_TOKEN = process.env.APP_AI_TOKEN;
 const PORT = Number(process.env.PORT || process.env.AI_LOCAL_PORT || 8787);
 
 if (!OPENAI_API_KEY) {
-  console.error('Missing OPENAI_API_KEY in .env');
-  process.exit(1);
+  throw new Error('Missing OPENAI_API_KEY in environment.');
 }
 
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 const app = express();
+const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
@@ -74,11 +74,11 @@ function requireAppToken(req, res, next) {
   return next();
 }
 
-app.get('/ai/health', (_req, res) => {
+router.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'voice-journal-ai-local' });
 });
 
-app.post('/ai/transcribe', requireAppToken, upload.single('file'), async (req, res) => {
+router.post('/transcribe', requireAppToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file?.buffer) {
       return res.status(400).json({ error: 'Missing audio file (multipart field: file).' });
@@ -101,7 +101,7 @@ app.post('/ai/transcribe', requireAppToken, upload.single('file'), async (req, r
   }
 });
 
-app.post('/ai/summarize', requireAppToken, async (req, res) => {
+router.post('/summarize', requireAppToken, async (req, res) => {
   try {
     const transcript = String(req.body?.transcript || '').trim();
     if (!transcript) {
@@ -140,7 +140,7 @@ app.post('/ai/summarize', requireAppToken, async (req, res) => {
   }
 });
 
-app.post('/ai/tags', requireAppToken, async (req, res) => {
+router.post('/tags', requireAppToken, async (req, res) => {
   try {
     const transcript = String(req.body?.transcript || '').trim();
     const summary = String(req.body?.summary || '').trim();
@@ -179,6 +179,14 @@ app.post('/ai/tags', requireAppToken, async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AI server listening on http://0.0.0.0:${PORT}`);
-});
+// Local/dev uses /ai/* and Vercel function paths use /api/ai/*.
+app.use('/ai', router);
+app.use('/api/ai', router);
+
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`AI server listening on http://0.0.0.0:${PORT}`);
+  });
+}
+
+module.exports = app;
