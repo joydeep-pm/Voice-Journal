@@ -10,7 +10,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const APP_AI_TOKEN = process.env.APP_AI_TOKEN;
-const PORT = Number(process.env.AI_LOCAL_PORT || 8787);
+const PORT = Number(process.env.PORT || process.env.AI_LOCAL_PORT || 8787);
 
 if (!OPENAI_API_KEY) {
   console.error('Missing OPENAI_API_KEY in .env');
@@ -26,6 +26,39 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+function hasDevanagari(text) {
+  return /[\u0900-\u097F]/.test(text);
+}
+
+async function translateToEnglishIfNeeded(text) {
+  const source = String(text || '').trim();
+  if (!source) {
+    return source;
+  }
+
+  if (!hasDevanagari(source)) {
+    return source;
+  }
+
+  const completion = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Translate the provided transcript into natural English. Return strict JSON with one key: {"text": "..."}',
+      },
+      { role: 'user', content: source },
+    ],
+  });
+
+  const raw = completion.choices?.[0]?.message?.content || '{}';
+  const parsed = JSON.parse(raw);
+  const translated = String(parsed.text || '').trim();
+  return translated || source;
+}
 
 function requireAppToken(req, res, next) {
   if (!APP_AI_TOKEN) {
@@ -60,7 +93,8 @@ app.post('/ai/transcribe', requireAppToken, upload.single('file'), async (req, r
       file: uploadFile,
     });
 
-    return res.json({ transcript: translation.text || '' });
+    const transcript = await translateToEnglishIfNeeded(translation.text || '');
+    return res.json({ transcript });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Transcription failed';
     return res.status(500).json({ error: message });
@@ -146,5 +180,5 @@ app.post('/ai/tags', requireAppToken, async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AI local server listening on http://0.0.0.0:${PORT}`);
+  console.log(`AI server listening on http://0.0.0.0:${PORT}`);
 });

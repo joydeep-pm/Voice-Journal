@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '@/src/ui/components';
 import { border, color, elevation, radius, space, spacing, touchTarget } from '@/src/ui/tokens';
 
-const BAR_HEIGHT = spacing[32] + spacing[24] + spacing[8];
+const BAR_HEIGHT = spacing[32] + spacing[24] + spacing[12];
 
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -79,7 +79,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                     ? options.tabBarIcon({
                         focused: isFocused,
                         color: iconColor,
-                        size: spacing[20],
+                        size: spacing[20] - 1,
                       })
                     : null}
                 </View>
@@ -161,8 +161,8 @@ export default function TabsLayout() {
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    left: space.pageX + space.compactGap,
-    right: space.pageX + space.compactGap,
+    left: space.pageX,
+    right: space.pageX,
   },
   bar: {
     height: BAR_HEIGHT,
@@ -170,7 +170,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.xxl,
     borderWidth: border.width,
     borderColor: color.border,
-    paddingHorizontal: space.compactGap,
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[8],
     flexDirection: 'row',
     alignItems: 'center',
     shadowColor: color.navShadow,
@@ -184,18 +185,20 @@ const styles = StyleSheet.create({
   },
   item: {
     flex: 1,
-    minHeight: touchTarget.min + space.cardGap,
+    minHeight: touchTarget.min + spacing[8],
     borderRadius: radius.control,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: space.compactGap / 2,
+    gap: spacing[4],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[4],
   },
   itemActive: {
     backgroundColor: 'transparent',
   },
   iconWrap: {
-    width: touchTarget.min - spacing[8],
-    height: touchTarget.min - spacing[8],
+    width: touchTarget.min - spacing[4],
+    height: touchTarget.min - spacing[4],
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -204,9 +207,11 @@ const styles = StyleSheet.create({
     backgroundColor: color.accentSoft,
   },
   tabLabel: {
-    fontSize: spacing[12] - 2,
-    lineHeight: spacing[12] + 2,
-    letterSpacing: 0.15,
+    fontSize: spacing[8] + 2,
+    lineHeight: spacing[12],
+    letterSpacing: 0.08,
+    textAlign: 'center',
+    width: '100%',
   },
   itemPressed: {
     opacity: 0.75,

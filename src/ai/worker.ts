@@ -7,6 +7,13 @@ const MAX_ATTEMPTS = 3;
 
 let running = false;
 
+function isLikelyNonEnglishTranscript(text: string | null | undefined): boolean {
+  if (!text) {
+    return false;
+  }
+  return /[\u0900-\u097F]/.test(text);
+}
+
 function normalizeError(error: unknown): string {
   if (error instanceof Error) {
     if (error.message === 'Network request failed') {
@@ -61,7 +68,7 @@ async function processTranscribeJob(job: AiJob) {
     throw new Error(`Entry ${job.entryId} not found.`);
   }
 
-  if (entry.transcript?.trim()) {
+  if (entry.transcript?.trim() && !isLikelyNonEnglishTranscript(entry.transcript)) {
     await markAiJobDone(job.id);
     await enqueueAiJob(entry.id, 'summarize');
     await updateEntry(entry.id, { aiStatus: 'queued' });

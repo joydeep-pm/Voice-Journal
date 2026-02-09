@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, SectionList, StyleSheet, View } from 'react-native';
-import { formatClock } from '@/src/audio/recorder';
 import { listEntries } from '@/src/db/entries';
 import type { Entry } from '@/src/db/types';
 import { AppHeader, Button, Card, Chip, EmptyState, IconButton, InlineStatus, LoadingState, Screen, Text } from '@/src/ui/components';
@@ -18,15 +17,6 @@ function titleForEntry(entry: Entry): string {
     return entry.summary.trim().split('\n')[0] || 'Audio note';
   }
   return 'Audio note';
-}
-
-function snippetForEntry(entry: Entry): string {
-  const transcript = entry.transcript?.trim();
-  if (!transcript) {
-    return 'No transcript yet';
-  }
-
-  return transcript.length > 80 ? `${transcript.slice(0, 80)}...` : transcript;
 }
 
 function getLocalDayKey(ms: number): string {
@@ -99,13 +89,6 @@ function toneForAiStatus(status: Entry['aiStatus']): 'info' | 'success' | 'error
     return 'success';
   }
   return 'info';
-}
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 function glyphForEntry(entry: Entry): keyof typeof Ionicons.glyphMap {
@@ -238,6 +221,8 @@ export default function HomeScreen() {
             renderItem={({ item }) => {
               const visibleTags = item.tags.slice(0, 2);
               const extra = item.tags.length - visibleTags.length;
+              const showStatus = item.aiStatus === 'summarized';
+              const hasBadgeContent = showStatus || visibleTags.length > 0 || extra > 0;
 
               return (
                 <Card style={styles.entryCard} onPress={() => router.push({ pathname: '/entry/[id]', params: { id: item.id } })}>
@@ -248,37 +233,20 @@ export default function HomeScreen() {
                     <Ionicons name={glyphForEntry(item)} size={spacing[20]} color={color.accent} />
                   </View>
 
-                  <Text variant="muted" numberOfLines={2}>
-                    {snippetForEntry(item)}
-                  </Text>
-
-                  <View style={styles.metaRow}>
-                    <Text variant="caption" tone="secondary" compact>
-                      {formatTime(item.createdAt)}
-                    </Text>
-                    <Text variant="caption" tone="secondary" compact>
-                      {formatClock(item.durationSec)}
-                    </Text>
-                    <InlineStatus quiet tone={toneForAiStatus(item.aiStatus)} message={item.aiStatus.toUpperCase()} />
-                  </View>
-
-                  <View style={styles.tagRow}>
-                    {visibleTags.length ? (
-                      visibleTags.map((tag, index) => (
+                  {hasBadgeContent ? (
+                    <View style={styles.badgeRow}>
+                      {showStatus ? <InlineStatus quiet tone={toneForAiStatus(item.aiStatus)} message="SUMMARIZED" /> : null}
+                      {visibleTags.map((tag, index) => (
                         <Chip
                           key={tag.id}
                           label={tag.name}
                           quiet
                           left={<Ionicons name={tagIcon(index)} size={spacing[12]} color={color.accentStrong} />}
                         />
-                      ))
-                    ) : (
-                      <Text variant="muted" compact>
-                        No tags
-                      </Text>
-                    )}
-                    {extra > 0 ? <Chip label={`+${extra}`} dashed /> : null}
-                  </View>
+                      ))}
+                      {extra > 0 ? <Chip label={`+${extra}`} dashed /> : null}
+                    </View>
+                  ) : null}
                 </Card>
               );
             }}
@@ -310,6 +278,12 @@ const styles = StyleSheet.create({
   titleText: {
     flex: 1,
   },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing[8],
+  },
   listWrap: {
     flex: 1,
   },
@@ -334,18 +308,6 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     marginBottom: space.controlGap,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.controlGap,
-    flexWrap: 'wrap',
-  },
-  tagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.controlGap,
-    flexWrap: 'wrap',
   },
   sectionGap: {
     height: space.sectionGap,

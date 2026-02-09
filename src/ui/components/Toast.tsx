@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { Text } from '@/src/ui/components/Text';
-import { colors, radii, spacing } from '@/src/ui/tokens';
+import { color, radii, spacing } from '@/src/ui/tokens';
 
 type ToastTone = 'info' | 'success' | 'error';
 
@@ -12,9 +12,9 @@ type ToastProps = {
 };
 
 const toneMap: Record<ToastTone, { bg: string; fg: string }> = {
-  info: { bg: '#EEF2FF', fg: colors.accent },
-  success: { bg: '#DCFCE7', fg: colors.success },
-  error: { bg: '#FEE2E2', fg: colors.danger },
+  info: { bg: color.accentSoft, fg: color.accentStrong },
+  success: { bg: color.successSoft, fg: color.success },
+  error: { bg: color.dangerSoft, fg: color.danger },
 };
 
 export function Toast({ visible, message, tone = 'info' }: ToastProps) {

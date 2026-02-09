@@ -51,31 +51,31 @@ export const typography = {
 } as const;
 
 export const colors = {
-  bg: '#FFF9F2',
-  surface: '#FEFEFE',
-  text: '#423833',
-  muted: '#8C7B72',
-  border: '#F2E7DC',
-  accent: '#FF7F50',
-  danger: '#EF4444',
-  success: '#16A34A',
+  bg: '#F3F4DE',
+  surface: '#FFFDF7',
+  text: '#351F1A',
+  muted: '#7F7A70',
+  border: '#E7E6D8',
+  accent: '#5A762E',
+  danger: '#B85C5C',
+  success: '#6E4A4E',
 } as const;
 
 export const color = {
   bg: colors.bg,
   surface: colors.surface,
-  surfaceSubtle: '#FFF4EA',
+  surfaceSubtle: '#F7F5EA',
   text: colors.text,
   textSecondary: colors.muted,
   border: colors.border,
   accent: colors.accent,
-  accentSoft: '#FFE7DC',
-  accentStrong: '#FF6A32',
+  accentSoft: '#DEE5CB',
+  accentStrong: '#4E6828',
   danger: colors.danger,
-  dangerSoft: '#FFE7E2',
-  success: '#00796B',
-  successSoft: '#E0F2F1',
-  navShadow: '#000000',
+  dangerSoft: '#F3DADA',
+  success: colors.success,
+  successSoft: '#D7A8AD',
+  navShadow: '#36331F',
 } as const;
 
 export const touchTarget = {

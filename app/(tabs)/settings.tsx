@@ -4,7 +4,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { checkAiBackendHealth, getAiBackendBaseUrl } from '@/src/ai/client';
 import { runAiWorker } from '@/src/ai/worker';
-import { createEntry, deleteEntry, exportJournalData, getEntry, listEntries, updateEntry } from '@/src/db/entries';
+import { createEntry, deleteAllEntries, deleteEntry, exportJournalData, getEntry, listEntries, updateEntry } from '@/src/db/entries';
 import { listAiJobs } from '@/src/db/jobs';
 import { AppHeader, Button, Card, InlineStatus, Screen, Text } from '@/src/ui/components';
 import { border, color, radius, space, spacing, typography } from '@/src/ui/tokens';
@@ -13,6 +13,7 @@ export default function SettingsScreen() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const currentAiUrl = (() => {
     try {
       return getAiBackendBaseUrl();
@@ -27,6 +28,7 @@ export default function SettingsScreen() {
 
   const testAiConnection = async () => {
     setBusyAction('ai-health');
+    setConfirmDeleteAll(false);
     setStatus(null);
 
     try {
@@ -41,6 +43,7 @@ export default function SettingsScreen() {
 
   const exportData = async () => {
     setBusyAction('export');
+    setConfirmDeleteAll(false);
     setStatus(null);
 
     try {
@@ -68,6 +71,7 @@ export default function SettingsScreen() {
 
   const runCrudCheck = async () => {
     setBusyAction('crud');
+    setConfirmDeleteAll(false);
     setStatus(null);
 
     try {
@@ -100,6 +104,7 @@ export default function SettingsScreen() {
 
   const runQueue = async () => {
     setBusyAction('queue');
+    setConfirmDeleteAll(false);
     setStatus(null);
 
     try {
@@ -110,6 +115,27 @@ export default function SettingsScreen() {
       setStatus(error instanceof Error ? error.message : 'Worker failed.');
     } finally {
       setBusyAction(null);
+    }
+  };
+
+  const deleteAll = async () => {
+    if (!confirmDeleteAll) {
+      setConfirmDeleteAll(true);
+      setStatus('Tap "Delete all entries" again to confirm.');
+      return;
+    }
+
+    setBusyAction('delete-all');
+    setStatus(null);
+
+    try {
+      const removed = await deleteAllEntries();
+      setStatus(`Deleted ${removed} entr${removed === 1 ? 'y' : 'ies'}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Delete all failed.');
+    } finally {
+      setBusyAction(null);
+      setConfirmDeleteAll(false);
     }
   };
 
@@ -144,6 +170,12 @@ export default function SettingsScreen() {
         <Button
           label={busyAction === 'export' ? 'Exporting...' : 'Export JSON'}
           onPress={() => void exportData()}
+          disabled={Boolean(busyAction)}
+        />
+        <Button
+          label={busyAction === 'delete-all' ? 'Deleting...' : confirmDeleteAll ? 'Confirm delete all entries' : 'Delete all entries'}
+          variant="secondary"
+          onPress={() => void deleteAll()}
           disabled={Boolean(busyAction)}
         />
       </Card>

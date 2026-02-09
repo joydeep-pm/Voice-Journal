@@ -52,6 +52,6 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   quiet: {
-    backgroundColor: '#FFFDF9',
+    backgroundColor: color.surfaceSubtle,
   },
 });

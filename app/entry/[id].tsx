@@ -1,30 +1,69 @@
 import Slider from '@react-native-community/slider';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
 import { formatClock } from '@/src/audio/recorder';
 import { useAudioPlayer } from '@/src/audio/player';
 import { generateTagsForEntry, runAiWorker } from '@/src/ai/worker';
-import { attachTag, createTag, detachTag, getEntry, listTags } from '@/src/db/entries';
+import { attachTag, createTag, detachTag, getEntry, listTags, updateEntry } from '@/src/db/entries';
 import { enqueueAiJob } from '@/src/db/jobs';
 import type { Entry, Tag } from '@/src/db/types';
-import { Button, Card, Chip, InlineStatus, LoadingState, Screen, Text } from '@/src/ui/components';
+import { Button, Card, InlineStatus, LoadingState, Screen, Text } from '@/src/ui/components';
 import { border, color, radius, space, spacing, typography } from '@/src/ui/tokens';
-
-function formatDate(ms: number) {
-  return new Date(ms).toLocaleString();
-}
 
 function fileNameFromUri(uri: string) {
   const segments = uri.split('/');
   return segments[segments.length - 1] || uri;
 }
 
-function entryTitle(entry: Entry): string {
-  if (entry.summary?.trim()) {
-    return entry.summary.trim().split('\n')[0] || 'Audio note';
+function parseSummary(summary?: string | null): { title: string | null; bullets: string[] } {
+  const text = summary?.trim() ?? '';
+  if (!text) {
+    return { title: null, bullets: [] };
   }
-  return 'Audio note';
+
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const title = lines[0] || null;
+  const bullets = lines
+    .slice(1)
+    .map((line) => line.replace(/^-+\s*/, '').trim())
+    .filter(Boolean);
+
+  return { title, bullets };
+}
+
+const MOOD_OPTIONS = ['great', 'good', 'neutral', 'stressed', 'low'] as const;
+type MoodValue = (typeof MOOD_OPTIONS)[number];
+
+function detectMoodFromText(input: string): MoodValue {
+  const text = input.toLowerCase();
+  const positive = ['great', 'happy', 'excited', 'good', 'love', 'confident', 'grateful', 'calm'];
+  const negative = ['sad', 'low', 'down', 'upset', 'angry', 'frustrated', 'tired', 'hopeless'];
+  const stressed = ['stress', 'stressed', 'anxious', 'anxiety', 'overwhelmed', 'worried', 'pressure', 'burnout'];
+
+  let score = 0;
+  for (const word of positive) {
+    if (text.includes(word)) score += 1;
+  }
+  for (const word of negative) {
+    if (text.includes(word)) score -= 1;
+  }
+
+  const stressHits = stressed.reduce((count, word) => (text.includes(word) ? count + 1 : count), 0);
+  if (stressHits >= 2) {
+    return 'stressed';
+  }
+  if (score >= 2) {
+    return 'great';
+  }
+  if (score === 1) {
+    return 'good';
+  }
+  if (score <= -2) {
+    return 'low';
+  }
+  return 'neutral';
 }
 
 export default function EntryDetailScreen() {
@@ -41,6 +80,7 @@ export default function EntryDetailScreen() {
   const [busyTag, setBusyTag] = useState(false);
   const [busyAi, setBusyAi] = useState(false);
   const [busyAiTags, setBusyAiTags] = useState(false);
+  const [busyMood, setBusyMood] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -106,6 +146,9 @@ export default function EntryDetailScreen() {
   }, [allTags, entry]);
 
   const canGenerateAiTags = Boolean(entry?.transcript?.trim() || entry?.summary?.trim());
+  const summaryParts = useMemo(() => parseSummary(entry?.summary), [entry?.summary]);
+  const transcriptText = entry?.transcript?.trim() ?? '';
+  const moodValue = (entry?.mood ?? null) as MoodValue | null;
 
   const addTagByName = async () => {
     if (!entry || !newTagName.trim()) {
@@ -210,6 +253,47 @@ export default function EntryDetailScreen() {
     }
   };
 
+  const shareTranscript = async () => {
+    if (!transcriptText) {
+      return;
+    }
+
+    try {
+      await Share.share({ message: transcriptText });
+    } catch (shareError) {
+      setInfoMessage(shareError instanceof Error ? shareError.message : 'Failed to share transcript.');
+    }
+  };
+
+  const setMood = async (mood: MoodValue | null) => {
+    if (!entry) {
+      return;
+    }
+
+    setBusyMood(true);
+    setInfoMessage(null);
+    try {
+      await updateEntry(entry.id, { mood });
+      setEntry((prev) => (prev ? { ...prev, mood } : prev));
+    } catch (moodError) {
+      setInfoMessage(moodError instanceof Error ? moodError.message : 'Failed to update mood.');
+    } finally {
+      setBusyMood(false);
+    }
+  };
+
+  const autoDetectMood = async () => {
+    const text = `${entry?.transcript ?? ''}\n${entry?.summary ?? ''}`.trim();
+    if (!text) {
+      setInfoMessage('Add transcript or summary first to auto-detect mood.');
+      return;
+    }
+
+    const detected = detectMoodFromText(text);
+    await setMood(detected);
+    setInfoMessage(`Mood set to ${detected}.`);
+  };
+
   if (loading) {
     return (
       <Screen>
@@ -228,40 +312,74 @@ export default function EntryDetailScreen() {
 
   return (
     <Screen>
-      <View style={styles.entryHeader}>
-        <Text variant="h1" numberOfLines={2}>
-          {entryTitle(entry)}
-        </Text>
-        <Text variant="muted">{formatDate(entry.createdAt)}</Text>
-      </View>
-
-      <Card quiet>
-        <View style={styles.sectionTitleRow}>
-          <View style={styles.titleMarker} />
-          <Text variant="h2">Player</Text>
+      <Card quiet style={styles.sectionCard}>
+        <View style={styles.audioPathWrap}>
+          <Text variant="caption" tone="secondary" numberOfLines={1} style={styles.audioPathText}>
+            /audio/{fileNameFromUri(entry.audioUri)}
+          </Text>
         </View>
-        <Text variant="caption" tone="secondary" numberOfLines={1}>
-          {fileNameFromUri(entry.audioUri)}
-        </Text>
 
         <View style={styles.row}>
-          <Button
-            label={player.isPlaying ? 'Pause' : 'Play'}
+          <Pressable
             onPress={() => void player.togglePlayPause()}
             disabled={!player.isLoaded}
-          />
-          <Button
-            label="Restart"
-            variant="secondary"
-            compact
+            style={({ pressed }) => [
+              styles.primaryAction,
+              !player.isLoaded ? styles.disabledAction : null,
+              pressed ? styles.pressedAction : null,
+            ]}
+          >
+            <Ionicons name={player.isPlaying ? 'pause' : 'play'} size={spacing[16]} color={color.surface} />
+            <Text variant="body" style={styles.primaryActionText}>
+              {player.isPlaying ? 'Pause' : 'Play'}
+            </Text>
+          </Pressable>
+
+          <Pressable
             onPress={() => void player.seekTo(0)}
             disabled={!player.isLoaded}
-          />
+            style={({ pressed }) => [
+              styles.secondaryAction,
+              !player.isLoaded ? styles.disabledAction : null,
+              pressed ? styles.pressedAction : null,
+            ]}
+          >
+            <Ionicons name="refresh" size={spacing[16]} color={color.accent} />
+            <Text variant="body" tone="accent">
+              Restart
+            </Text>
+          </Pressable>
         </View>
 
         <View style={styles.row}>
-          <Button label="-10s" variant="secondary" compact onPress={() => jumpBy(-10)} disabled={!player.isLoaded} />
-          <Button label="+10s" variant="secondary" compact onPress={() => jumpBy(10)} disabled={!player.isLoaded} />
+          <Pressable
+            onPress={() => jumpBy(-10)}
+            disabled={!player.isLoaded}
+            style={({ pressed }) => [
+              styles.secondaryAction,
+              styles.smallAction,
+              !player.isLoaded ? styles.disabledAction : null,
+              pressed ? styles.pressedAction : null,
+            ]}
+          >
+            <Text variant="body" tone="accent">
+              -10s
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => jumpBy(10)}
+            disabled={!player.isLoaded}
+            style={({ pressed }) => [
+              styles.secondaryAction,
+              styles.smallAction,
+              !player.isLoaded ? styles.disabledAction : null,
+              pressed ? styles.pressedAction : null,
+            ]}
+          >
+            <Text variant="body" tone="accent">
+              +10s
+            </Text>
+          </Pressable>
         </View>
 
         <Slider
@@ -281,38 +399,97 @@ export default function EntryDetailScreen() {
         />
 
         <View style={styles.metaRow}>
-          <Text variant="caption" tone="secondary" compact>
+          <Text variant="body" compact>
             {formatClock(sliderValue)} / {formatClock(maxDurationSec)}
           </Text>
           <Text variant="caption" tone="secondary" compact>
-            -{formatClock(remainingSec)}
+            Remaining: -{formatClock(remainingSec)}
           </Text>
         </View>
         {player.error ? <InlineStatus tone="error" message={player.error} /> : null}
       </Card>
 
-      <Card quiet>
-        <View style={styles.sectionTitleRow}>
-          <View style={styles.titleMarker} />
-          <Text variant="h2">AI</Text>
+      <Card quiet style={styles.sectionCard}>
+        <View style={styles.sectionHeaderRow}>
+          <Text variant="h2">Summary</Text>
+          <InlineStatus
+            message={entry.aiStatus === 'summarized' ? 'SUMMARIZED' : entry.aiStatus.toUpperCase()}
+            tone={entry.aiStatus === 'error' ? 'error' : entry.aiStatus === 'summarized' ? 'success' : 'info'}
+            quiet
+          />
         </View>
-        <InlineStatus
-          message={`Status: ${entry.aiStatus.toUpperCase()}`}
-          tone={entry.aiStatus === 'error' ? 'error' : entry.aiStatus === 'summarized' ? 'success' : 'info'}
-        />
+
+        {summaryParts.title ? (
+          <View style={styles.summaryWrap}>
+            <Text variant="h2">{summaryParts.title}</Text>
+            {summaryParts.bullets.length ? (
+              summaryParts.bullets.map((bullet, index) => (
+                <View key={`${index}-${bullet}`} style={styles.bulletRow}>
+                  <View style={styles.bulletBar} />
+                  <Text variant="body" tone="secondary" style={styles.bulletText}>
+                    - {bullet}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text variant="muted">No bullet points yet.</Text>
+            )}
+          </View>
+        ) : (
+          <Text variant="muted">No summary yet.</Text>
+        )}
+
+        {entry.aiStatus !== 'summarized' || Boolean(entry.errorMsg) ? (
+          <Button
+            label={busyAi ? 'Processing...' : 'Process with AI'}
+            onPress={() => void processWithAi()}
+            disabled={busyAi || entry.aiStatus === 'queued'}
+            variant="secondary"
+          />
+        ) : null}
         {entry.errorMsg ? <InlineStatus tone="error" message={entry.errorMsg} /> : null}
+      </Card>
+
+      <Card quiet compact style={styles.sectionCard}>
+        <View style={styles.sectionHeaderRow}>
+          <Text variant="h2">Mood</Text>
+          {moodValue ? <InlineStatus quiet message={moodValue.toUpperCase()} tone="info" /> : null}
+        </View>
+
+        <View style={styles.wrapRow}>
+          {MOOD_OPTIONS.map((mood) => {
+            const selected = moodValue === mood;
+            return (
+              <Pressable
+                key={mood}
+                onPress={() => void setMood(selected ? null : mood)}
+                disabled={busyMood}
+                style={({ pressed }) => [
+                  styles.moodChip,
+                  selected ? styles.moodChipSelected : null,
+                  pressed ? styles.pressedAction : null,
+                  busyMood ? styles.disabledAction : null,
+                ]}
+              >
+                <Text variant="caption" tone={selected ? 'accent' : 'secondary'} compact>
+                  {mood}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <Button
-          label={busyAi ? 'Processing...' : 'Process with AI'}
-          onPress={() => void processWithAi()}
-          disabled={busyAi || entry.aiStatus === 'queued'}
+          label={busyMood ? 'Updating...' : 'Auto-detect mood'}
+          variant="secondary"
+          compact
+          onPress={() => void autoDetectMood()}
+          disabled={busyMood}
         />
       </Card>
 
-      <Card quiet>
-        <View style={styles.sectionTitleRow}>
-          <View style={styles.titleMarker} />
-          <Text variant="h2">Tags</Text>
-        </View>
+      <Card quiet style={styles.sectionCard}>
+        <Text variant="h2">Tags</Text>
 
         <Button
           label={busyAiTags ? 'Generating...' : 'Generate tags with AI'}
@@ -327,12 +504,20 @@ export default function EntryDetailScreen() {
         <View style={styles.wrapRow}>
           {entry.tags.length ? (
             entry.tags.map((tag) => (
-              <Chip
+              <Pressable
                 key={tag.id}
-                label={`#${tag.name} x`}
                 onPress={() => void removeTag(tag.id)}
                 disabled={busyTag}
-              />
+                style={({ pressed }) => [
+                  styles.removableChip,
+                  pressed ? styles.pressedAction : null,
+                ]}
+              >
+                <Text variant="body" compact>
+                  #{tag.name}
+                </Text>
+                <Ionicons name="close" size={spacing[12]} color={color.textSecondary} />
+              </Pressable>
             ))
           ) : (
             <Text variant="muted">No tags yet.</Text>
@@ -360,38 +545,48 @@ export default function EntryDetailScreen() {
 
         {attachableTags.length ? (
           <View style={styles.attachWrap}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.wrapRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.attachRow}>
               {attachableTags.map((tag) => (
-                <Chip
+                <Pressable
                   key={`available-${tag.id}`}
-                  label={`+ #${tag.name}`}
                   onPress={() => void addExistingTag(tag.id)}
                   disabled={busyTag}
-                />
+                  style={({ pressed }) => [
+                    styles.availableChip,
+                    pressed ? styles.pressedAction : null,
+                  ]}
+                >
+                  <Ionicons name="add" size={spacing[12]} color={color.textSecondary} />
+                  <Text variant="caption" tone="secondary" compact>
+                    #{tag.name}
+                  </Text>
+                </Pressable>
               ))}
             </ScrollView>
-            {attachableTags.length > 3 ? <View pointerEvents="none" style={styles.attachHint} /> : null}
           </View>
         ) : null}
       </Card>
 
-      <Card quiet>
-        <View style={styles.sectionTitleRow}>
-          <View style={styles.titleMarker} />
+      <Card quiet style={styles.sectionCard}>
+        <View style={styles.sectionHeaderRow}>
           <Text variant="h2">Transcript</Text>
+          <Pressable
+            onPress={() => void shareTranscript()}
+            disabled={!transcriptText}
+            style={({ pressed }) => [
+              styles.copyButton,
+              !transcriptText ? styles.disabledAction : null,
+              pressed ? styles.pressedAction : null,
+            ]}
+          >
+            <Ionicons name="copy-outline" size={spacing[16]} color={color.accent} />
+          </Pressable>
         </View>
         <Text variant="body" style={styles.longText}>
-          {entry.transcript?.trim() || 'No transcript yet.'}
+          {transcriptText || 'No transcript yet.'}
         </Text>
-      </Card>
-
-      <Card quiet>
-        <View style={styles.sectionTitleRow}>
-          <View style={styles.titleMarker} />
-          <Text variant="h2">Summary</Text>
-        </View>
-        <Text variant="body" style={styles.longText}>
-          {entry.summary?.trim() || 'No summary yet.'}
+        <Text variant="caption" tone="secondary" style={styles.transcriptMeta}>
+          Transcribed automatically.
         </Text>
       </Card>
 
@@ -401,26 +596,56 @@ export default function EntryDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  entryHeader: {
-    gap: space.compactGap,
-    marginBottom: space.compactGap,
+  sectionCard: {
+    gap: spacing[8],
   },
-  sectionTitleRow: {
+  sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.controlGap,
+    justifyContent: 'space-between',
+    gap: spacing[8],
   },
-  titleMarker: {
-    width: spacing[4],
-    height: spacing[16],
-    borderRadius: spacing[4],
-    backgroundColor: color.accent,
+  audioPathWrap: {
+    borderWidth: border.width,
+    borderColor: color.border,
+    borderRadius: spacing[8],
+    backgroundColor: color.surfaceSubtle,
+    paddingHorizontal: spacing[12],
+    paddingVertical: spacing[8],
+  },
+  audioPathText: {
+    fontFamily: 'monospace',
   },
   row: {
     flexDirection: 'row',
-    gap: space.controlGap,
+    gap: spacing[8],
     alignItems: 'center',
-    flexWrap: 'wrap',
+  },
+  primaryAction: {
+    flex: 1,
+    minHeight: spacing[32] + spacing[12],
+    borderRadius: radius.control,
+    backgroundColor: color.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing[8],
+  },
+  primaryActionText: {
+    color: color.surface,
+  },
+  secondaryAction: {
+    flex: 1,
+    minHeight: spacing[32] + spacing[12],
+    borderRadius: radius.control,
+    backgroundColor: color.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing[8],
+  },
+  smallAction: {
+    minHeight: spacing[32],
   },
   slider: {
     width: '100%',
@@ -434,12 +659,12 @@ const styles = StyleSheet.create({
   wrapRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: space.controlGap,
+    gap: spacing[8],
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.controlGap,
+    gap: spacing[8],
   },
   input: {
     flex: 1,
@@ -453,31 +678,90 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes[16],
   },
   addButton: {
-    minWidth: spacing[32] + spacing[20],
+    minWidth: spacing[32] + spacing[12],
   },
   attachWrap: {
-    position: 'relative',
+    marginTop: spacing[4],
+  },
+  attachRow: {
+    gap: spacing[8],
+    paddingRight: spacing[8],
+  },
+  removableChip: {
+    minHeight: spacing[32],
+    paddingHorizontal: spacing[12],
     borderRadius: radius.control,
     borderWidth: border.width,
     borderColor: color.border,
-    padding: space.controlGap,
-    backgroundColor: color.surfaceSubtle,
+    backgroundColor: color.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[8],
   },
-  attachHint: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
+  availableChip: {
+    minHeight: spacing[32],
+    paddingHorizontal: spacing[12],
+    borderRadius: radius.control,
+    borderWidth: border.width,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[4],
+  },
+  moodChip: {
+    minHeight: spacing[32],
+    paddingHorizontal: spacing[12],
+    borderRadius: radius.control,
+    borderWidth: border.width,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moodChipSelected: {
+    backgroundColor: color.accentSoft,
+    borderColor: color.accent,
+  },
+  summaryWrap: {
+    gap: spacing[4],
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[8],
+  },
+  bulletBar: {
+    width: spacing[4],
+    height: spacing[24],
+    borderRadius: spacing[4],
+    backgroundColor: color.accentSoft,
+    marginTop: spacing[4],
+  },
+  bulletText: {
+    flex: 1,
+  },
+  copyButton: {
     width: spacing[32],
-    borderTopRightRadius: radius.control,
-    borderBottomRightRadius: radius.control,
-    borderLeftWidth: border.width,
-    borderLeftColor: color.border,
-    opacity: 0.55,
-    backgroundColor: color.surfaceSubtle,
+    height: spacing[32],
+    borderRadius: spacing[8],
+    borderWidth: border.width,
+    borderColor: color.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.surface,
+  },
+  disabledAction: {
+    opacity: 0.5,
+  },
+  pressedAction: {
+    opacity: 0.75,
   },
   longText: {
-    lineHeight: typography.sizes[24],
+    lineHeight: typography.sizes[16] + spacing[8],
     color: color.text,
+  },
+  transcriptMeta: {
+    marginTop: spacing[8],
   },
 });

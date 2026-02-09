@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
   },
   quiet: {
-    backgroundColor: '#FFFCF8',
+    backgroundColor: color.surfaceSubtle,
     shadowOpacity: 0.05,
     elevation: 1,
   },

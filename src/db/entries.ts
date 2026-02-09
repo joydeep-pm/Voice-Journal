@@ -165,6 +165,21 @@ export async function deleteEntry(id: string): Promise<void> {
   await db.runAsync('DELETE FROM entries WHERE id = ?;', id);
 }
 
+export async function deleteAllEntries(): Promise<number> {
+  await initDb();
+  const db = await getDb();
+
+  const countRow = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM entries;');
+  const removed = countRow?.count ?? 0;
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM entries;');
+    await db.runAsync('DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM entry_tags);');
+  });
+
+  return removed;
+}
+
 function normalizeTagName(name: string): string {
   return name.trim().replace(/\s+/g, ' ');
 }
