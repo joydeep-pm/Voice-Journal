@@ -16,4 +16,36 @@ export {
   exportJournalData,
 } from '@/src/db/entries';
 export { enqueueAiJob, listAiJobs } from '@/src/db/jobs';
-export type { Entry, EntryPatch, Tag, AiJob, WeeklyCount, TopTag, WeeklyTheme } from '@/src/db/types';
+export {
+  createStressCheckIn,
+  listRecentStressCheckIns,
+  startInterventionSession,
+  completeInterventionSession,
+  listInterventionSessions,
+  saveGad2Assessment,
+  listGad2Assessments,
+  getReminderPreferences,
+  updateReminderPreferences,
+  getSafetyPlan,
+  updateSafetyPlan,
+  getSyncState,
+  updateSyncState,
+} from '@/src/db/wellness';
+export type {
+  Entry,
+  EntryPatch,
+  Tag,
+  AiJob,
+  WeeklyCount,
+  TopTag,
+  WeeklyTheme,
+  Workspace,
+  WorkspaceInitState,
+  StressCheckIn,
+  InterventionType,
+  InterventionSession,
+  Gad2Assessment,
+  ReminderPreferences,
+  SafetyPlan,
+  SyncState,
+} from '@/src/db/types';

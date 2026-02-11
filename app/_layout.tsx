@@ -14,9 +14,11 @@ import { useAppRuntime } from '@/src/runtime/useAppRuntime';
 import { Button, Card, Text } from '@/src/ui/components';
 import { setUiFontEnabled } from '@/src/ui/fontState';
 import { color, space } from '@/src/ui/tokens';
+import { WorkspaceProvider, useWorkspace } from '@/src/workspace/WorkspaceContext';
 
-export default function RootLayout() {
+function RootLayoutBody() {
   useAppRuntime();
+  const workspace = useWorkspace();
   const biometric = useBiometricGate();
   const [fontsLoaded, fontError] = useFonts({
     Quicksand_400Regular,
@@ -29,6 +31,17 @@ export default function RootLayout() {
     setUiFontEnabled(fontsLoaded && !fontError);
   }, [fontsLoaded, fontError]);
 
+  if (!workspace.ready) {
+    return (
+      <View style={styles.loadingWrap}>
+        <Card style={styles.lockCard}>
+          <Text variant="h1">Preparing workspaces</Text>
+          <Text variant="muted">Initializing personal and professional data stores...</Text>
+        </Card>
+      </View>
+    );
+  }
+
   const lockVisible = biometric.enabled && (!biometric.ready || (biometric.supported && !biometric.unlocked));
 
   return (
@@ -38,6 +51,16 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="entry/[id]" options={{ title: 'Entry Detail' }} />
       </Stack>
+      {workspace.migrationError ? (
+        <View style={styles.warningWrap}>
+          <Card quiet>
+            <Text variant="caption" tone="danger">
+              Workspace migration warning
+            </Text>
+            <Text variant="muted">{workspace.migrationError}</Text>
+          </Card>
+        </View>
+      ) : null}
       {lockVisible ? (
         <View style={styles.lockBackdrop}>
           <Card style={styles.lockCard}>
@@ -52,7 +75,27 @@ export default function RootLayout() {
   );
 }
 
+export default function RootLayout() {
+  return (
+    <WorkspaceProvider>
+      <RootLayoutBody />
+    </WorkspaceProvider>
+  );
+}
+
 const styles = StyleSheet.create({
+  loadingWrap: {
+    flex: 1,
+    backgroundColor: color.bg,
+    justifyContent: 'center',
+    paddingHorizontal: space.pageX,
+  },
+  warningWrap: {
+    position: 'absolute',
+    left: space.pageX,
+    right: space.pageX,
+    top: space.pageX,
+  },
   lockBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(17, 24, 39, 0.28)',

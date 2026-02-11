@@ -1,6 +1,6 @@
 import { getDb, initDb } from '@/src/db/client';
 import { updateEntry } from '@/src/db/entries';
-import type { AiJob, AiJobType } from '@/src/db/types';
+import type { AiJob, AiJobType, DbOptions } from '@/src/db/types';
 
 type AiJobRow = {
   id: string;
@@ -30,9 +30,13 @@ function toAiJob(row: AiJobRow): AiJob {
   };
 }
 
-export async function enqueueAiJob(entryId: string, type: AiJobType): Promise<{ enqueued: boolean; jobId?: string }> {
-  await initDb();
-  const db = await getDb();
+export async function enqueueAiJob(
+  entryId: string,
+  type: AiJobType,
+  options: DbOptions = {}
+): Promise<{ enqueued: boolean; jobId?: string }> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const existing = await db.getFirstAsync<{ id: string }>(
     `
@@ -63,13 +67,13 @@ export async function enqueueAiJob(entryId: string, type: AiJobType): Promise<{ 
     now
   );
 
-  await updateEntry(entryId, { aiStatus: 'queued', errorMsg: null });
+  await updateEntry(entryId, { aiStatus: 'queued', errorMsg: null }, options);
   return { enqueued: true, jobId: id };
 }
 
-export async function claimNextQueuedAiJob(): Promise<AiJob | null> {
-  await initDb();
-  const db = await getDb();
+export async function claimNextQueuedAiJob(options: DbOptions = {}): Promise<AiJob | null> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const next = await db.getFirstAsync<AiJobRow>(
     `
@@ -103,15 +107,20 @@ export async function claimNextQueuedAiJob(): Promise<AiJob | null> {
   return claimed ? toAiJob(claimed) : null;
 }
 
-export async function markAiJobDone(jobId: string): Promise<void> {
-  await initDb();
-  const db = await getDb();
+export async function markAiJobDone(jobId: string, options: DbOptions = {}): Promise<void> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
   await db.runAsync('UPDATE ai_jobs SET status = ?, updated_at = ? WHERE id = ?;', 'done', Date.now(), jobId);
 }
 
-export async function requeueOrFailAiJob(job: AiJob, errorMessage: string, maxAttempts = 3): Promise<void> {
-  await initDb();
-  const db = await getDb();
+export async function requeueOrFailAiJob(
+  job: AiJob,
+  errorMessage: string,
+  maxAttempts = 3,
+  options: DbOptions = {}
+): Promise<void> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const attempts = job.attempts + 1;
   const failed = attempts >= maxAttempts;
@@ -131,15 +140,19 @@ export async function requeueOrFailAiJob(job: AiJob, errorMessage: string, maxAt
     job.id
   );
 
-  await updateEntry(job.entryId, {
-    aiStatus: failed ? 'error' : 'queued',
-    errorMsg: errorMessage,
-  });
+  await updateEntry(
+    job.entryId,
+    {
+      aiStatus: failed ? 'error' : 'queued',
+      errorMsg: errorMessage,
+    },
+    options
+  );
 }
 
-export async function listAiJobs(): Promise<AiJob[]> {
-  await initDb();
-  const db = await getDb();
+export async function listAiJobs(options: DbOptions = {}): Promise<AiJob[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
   const rows = await db.getAllAsync<AiJobRow>('SELECT * FROM ai_jobs ORDER BY created_at DESC;');
   return rows.map(toAiJob);
 }

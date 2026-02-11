@@ -8,9 +8,12 @@ import { useAudioPlayer } from '@/src/audio/player';
 import { generateTagsForEntry, runAiWorker } from '@/src/ai/worker';
 import { attachTag, createTag, detachTag, getEntry, listTags, updateEntry } from '@/src/db/entries';
 import { enqueueAiJob } from '@/src/db/jobs';
-import type { Entry, Tag } from '@/src/db/types';
+import { completeInterventionSession, createStressCheckIn, listRecentStressCheckIns, startInterventionSession } from '@/src/db/wellness';
+import type { Entry, InterventionType, StressCheckIn, Tag } from '@/src/db/types';
 import { Button, Card, InlineStatus, LoadingState, Screen, Text } from '@/src/ui/components';
 import { border, color, radius, space, spacing, typography } from '@/src/ui/tokens';
+import { useWorkspace } from '@/src/workspace/WorkspaceContext';
+import { interventionLabel } from '@/src/wellness/utils';
 
 function fileNameFromUri(uri: string) {
   const segments = uri.split('/');
@@ -67,6 +70,7 @@ function detectMoodFromText(input: string): MoodValue {
 }
 
 export default function EntryDetailScreen() {
+  const { activeWorkspace } = useWorkspace();
   const params = useLocalSearchParams<{ id: string }>();
   const entryId = typeof params.id === 'string' ? params.id : '';
 
@@ -82,6 +86,13 @@ export default function EntryDetailScreen() {
   const [busyAiTags, setBusyAiTags] = useState(false);
   const [busyMood, setBusyMood] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [stressIntensityDraft, setStressIntensityDraft] = useState(6);
+  const [checkIn, setCheckIn] = useState<StressCheckIn | null>(null);
+  const [activeTool, setActiveTool] = useState<InterventionType | null>(null);
+  const [toolSessionId, setToolSessionId] = useState<string | null>(null);
+  const [toolNotes, setToolNotes] = useState('');
+  const [reliefDraft, setReliefDraft] = useState(0);
+  const [busyWellness, setBusyWellness] = useState(false);
 
   const load = useCallback(async () => {
     if (!entryId) {
@@ -94,18 +105,32 @@ export default function EntryDetailScreen() {
     setError(null);
 
     try {
-      const [row, tags] = await Promise.all([getEntry(entryId), listTags()]);
+      const [row, tags, checkIns] = await Promise.all([
+        getEntry(entryId),
+        listTags(),
+        activeWorkspace === 'personal' ? listRecentStressCheckIns(20) : Promise.resolve([]),
+      ]);
       if (!row) {
         setError('Entry not found.');
       }
       setEntry(row);
       setAllTags(tags);
+      if (activeWorkspace === 'personal') {
+        const existing = checkIns.find((item) => item.entryId === entryId) ?? null;
+        setCheckIn(existing);
+        if (existing?.recommendedTool) {
+          setActiveTool(existing.recommendedTool);
+        }
+      } else {
+        setCheckIn(null);
+        setActiveTool(null);
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load entry.');
     } finally {
       setLoading(false);
     }
-  }, [entryId]);
+  }, [entryId, activeWorkspace]);
 
   useFocusEffect(
     useCallback(() => {
@@ -292,6 +317,67 @@ export default function EntryDetailScreen() {
     const detected = detectMoodFromText(text);
     await setMood(detected);
     setInfoMessage(`Mood set to ${detected}.`);
+  };
+
+  const saveStressCheckIn = async () => {
+    if (!entry || activeWorkspace !== 'personal') {
+      return;
+    }
+
+    setBusyWellness(true);
+    setInfoMessage(null);
+    try {
+      const saved = await createStressCheckIn({
+        entryId: entry.id,
+        stressIntensity: stressIntensityDraft,
+      });
+      setCheckIn(saved);
+      setActiveTool(saved.recommendedTool);
+      setInfoMessage(`Stress check-in saved (${saved.stressIntensity}/10). Suggested: ${interventionLabel(saved.recommendedTool)}.`);
+    } catch (checkInError) {
+      setInfoMessage(checkInError instanceof Error ? checkInError.message : 'Failed to save stress check-in.');
+    } finally {
+      setBusyWellness(false);
+    }
+  };
+
+  const startTool = async (tool: InterventionType) => {
+    if (!checkIn || activeWorkspace !== 'personal') {
+      setInfoMessage('Save a stress check-in first.');
+      return;
+    }
+
+    setBusyWellness(true);
+    setInfoMessage(null);
+    try {
+      const session = await startInterventionSession(checkIn.id, tool, toolNotes.trim() || null);
+      setToolSessionId(session.id);
+      setActiveTool(tool);
+      setInfoMessage(`${interventionLabel(tool)} started.`);
+    } catch (sessionError) {
+      setInfoMessage(sessionError instanceof Error ? sessionError.message : 'Failed to start tool session.');
+    } finally {
+      setBusyWellness(false);
+    }
+  };
+
+  const completeTool = async () => {
+    if (!toolSessionId || activeWorkspace !== 'personal') {
+      return;
+    }
+
+    setBusyWellness(true);
+    setInfoMessage(null);
+    try {
+      await completeInterventionSession(toolSessionId, reliefDraft, toolNotes.trim() || null);
+      setInfoMessage(`Tool completed. Relief delta recorded: ${reliefDraft > 0 ? '+' : ''}${reliefDraft}.`);
+      setToolSessionId(null);
+      setToolNotes('');
+    } catch (completionError) {
+      setInfoMessage(completionError instanceof Error ? completionError.message : 'Failed to complete tool session.');
+    } finally {
+      setBusyWellness(false);
+    }
   };
 
   if (loading) {
@@ -487,6 +573,132 @@ export default function EntryDetailScreen() {
           disabled={busyMood}
         />
       </Card>
+
+      {activeWorkspace === 'personal' ? (
+        <Card quiet style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Text variant="h2">Stress check-in</Text>
+            {checkIn ? (
+              <InlineStatus quiet tone="info" message={`${checkIn.stressIntensity}/10`} />
+            ) : null}
+          </View>
+
+          <Text variant="caption" tone="secondary">
+            How intense is your stress right now?
+          </Text>
+          <View style={styles.wrapRow}>
+            {[2, 4, 6, 8, 10].map((value) => {
+              const selected = stressIntensityDraft === value;
+              return (
+                <Pressable
+                  key={`stress-${value}`}
+                  onPress={() => setStressIntensityDraft(value)}
+                  disabled={busyWellness}
+                  style={({ pressed }) => [
+                    styles.moodChip,
+                    selected ? styles.moodChipSelected : null,
+                    pressed ? styles.pressedAction : null,
+                    busyWellness ? styles.disabledAction : null,
+                  ]}
+                >
+                  <Text variant="caption" tone={selected ? 'accent' : 'secondary'} compact>
+                    {value}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Button
+            label={busyWellness ? 'Saving...' : 'Save stress check-in'}
+            variant="secondary"
+            compact
+            onPress={() => void saveStressCheckIn()}
+            disabled={busyWellness}
+          />
+
+          {checkIn ? (
+            <>
+              <Text variant="muted">Suggested tool: {interventionLabel(checkIn.recommendedTool)}</Text>
+              <View style={styles.wrapRow}>
+                {(['breathing', 'grounding', 'reframe'] as InterventionType[]).map((tool) => {
+                  const selected = activeTool === tool;
+                  return (
+                    <Pressable
+                      key={tool}
+                      onPress={() => setActiveTool(tool)}
+                      style={({ pressed }) => [
+                        styles.moodChip,
+                        selected ? styles.moodChipSelected : null,
+                        pressed ? styles.pressedAction : null,
+                      ]}
+                    >
+                      <Text variant="caption" tone={selected ? 'accent' : 'secondary'} compact>
+                        {interventionLabel(tool)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {activeTool ? (
+                <View style={styles.toolBox}>
+                  {activeTool === 'breathing' ? (
+                    <Text variant="muted">Try 4 cycles: inhale 4s, hold 4s, exhale 4s, hold 4s.</Text>
+                  ) : null}
+                  {activeTool === 'grounding' ? (
+                    <Text variant="muted">Notice 5 things you see, 4 feel, 3 hear, 2 smell, 1 taste.</Text>
+                  ) : null}
+                  {activeTool === 'reframe' ? (
+                    <Text variant="muted">Write the thought, challenge it, then rewrite a balanced response.</Text>
+                  ) : null}
+
+                  <TextInput
+                    style={[styles.input, styles.toolNotesInput]}
+                    multiline
+                    placeholder="Optional notes for this tool session"
+                    value={toolNotes}
+                    onChangeText={setToolNotes}
+                    placeholderTextColor={color.textSecondary}
+                  />
+
+                  {!toolSessionId ? (
+                    <Button
+                      label={busyWellness ? 'Starting...' : `Start ${interventionLabel(activeTool)}`}
+                      compact
+                      onPress={() => void startTool(activeTool)}
+                      disabled={busyWellness}
+                    />
+                  ) : (
+                    <>
+                      <Text variant="caption" tone="secondary">
+                        Relief change (-5 to +5)
+                      </Text>
+                      <Slider
+                        minimumValue={-5}
+                        maximumValue={5}
+                        step={1}
+                        value={reliefDraft}
+                        onValueChange={(value) => setReliefDraft(Math.round(value))}
+                        minimumTrackTintColor={color.accent}
+                        maximumTrackTintColor={color.border}
+                        thumbTintColor={color.accent}
+                      />
+                      <Text variant="muted">Selected relief delta: {reliefDraft > 0 ? '+' : ''}{reliefDraft}</Text>
+                      <Button
+                        label={busyWellness ? 'Saving...' : 'Complete tool session'}
+                        compact
+                        variant="secondary"
+                        onPress={() => void completeTool()}
+                        disabled={busyWellness}
+                      />
+                    </>
+                  )}
+                </View>
+              ) : null}
+            </>
+          ) : null}
+        </Card>
+      ) : null}
 
       <Card quiet style={styles.sectionCard}>
         <Text variant="h2">Tags</Text>
@@ -763,5 +975,17 @@ const styles = StyleSheet.create({
   },
   transcriptMeta: {
     marginTop: spacing[8],
+  },
+  toolBox: {
+    borderWidth: border.width,
+    borderColor: color.border,
+    borderRadius: radius.control,
+    padding: space.controlGap,
+    gap: space.controlGap,
+    backgroundColor: color.surfaceSubtle,
+  },
+  toolNotesInput: {
+    minHeight: spacing[32] + spacing[16],
+    textAlignVertical: 'top',
   },
 });

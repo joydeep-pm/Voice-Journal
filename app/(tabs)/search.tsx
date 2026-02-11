@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, TextInput, View } from 'react-native';
 import { formatClock } from '@/src/audio/recorder';
 import { searchEntries } from '@/src/db/entries';
 import type { Entry } from '@/src/db/types';
 import { AppHeader, Button, Card, EmptyState, InlineStatus, LoadingState, Screen, Text } from '@/src/ui/components';
 import { border, color, radius, space, spacing, typography } from '@/src/ui/tokens';
+import { useWorkspace } from '@/src/workspace/WorkspaceContext';
 
 function titleForEntry(entry: Entry) {
   if (entry.summary?.trim()) {
@@ -17,10 +18,17 @@ function titleForEntry(entry: Entry) {
 
 export default function SearchScreen() {
   const router = useRouter();
+  const { activeWorkspace } = useWorkspace();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setQuery('');
+    setResults([]);
+    setError(null);
+  }, [activeWorkspace]);
 
   const runSearch = async () => {
     const trimmed = query.trim();

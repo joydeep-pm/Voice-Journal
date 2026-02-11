@@ -3,9 +3,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, SectionList, StyleSheet, View } from 'react-native';
 import { listEntries } from '@/src/db/entries';
-import type { Entry } from '@/src/db/types';
+import { createStressCheckIn, getReminderPreferences, listRecentStressCheckIns } from '@/src/db/wellness';
+import type { Entry, StressCheckIn } from '@/src/db/types';
 import { AppHeader, Button, Card, Chip, EmptyState, IconButton, InlineStatus, LoadingState, Screen, Text } from '@/src/ui/components';
 import { color, motion, space, spacing } from '@/src/ui/tokens';
+import { useWorkspace } from '@/src/workspace/WorkspaceContext';
+import { interventionLabel, shouldShowAdaptiveNudge } from '@/src/wellness/utils';
 
 type EntrySection = {
   title: string;
@@ -108,10 +111,14 @@ function tagIcon(index: number): keyof typeof Ionicons.glyphMap {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { activeWorkspace } = useWorkspace();
 
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [wellnessMessage, setWellnessMessage] = useState<string | null>(null);
+  const [nudgeMessage, setNudgeMessage] = useState<string | null>(null);
+  const [latestCheckIn, setLatestCheckIn] = useState<StressCheckIn | null>(null);
 
   const entrance = useRef(new Animated.Value(0)).current;
   const didAnimate = useRef(false);
@@ -122,12 +129,28 @@ export default function HomeScreen() {
     try {
       const rows = await listEntries();
       setEntries(rows);
+
+      if (activeWorkspace === 'personal') {
+        const [prefs, checkIns] = await Promise.all([getReminderPreferences(), listRecentStressCheckIns(1)]);
+        const latest = checkIns[0] ?? null;
+        setLatestCheckIn(latest);
+        setNudgeMessage(
+          shouldShowAdaptiveNudge({
+            preferences: prefs,
+            latestCheckIn: latest,
+            latestEntryAt: rows[0]?.createdAt ?? null,
+          })
+        );
+      } else {
+        setLatestCheckIn(null);
+        setNudgeMessage(null);
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load entries.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeWorkspace]);
 
   useFocusEffect(
     useCallback(() => {
@@ -137,6 +160,21 @@ export default function HomeScreen() {
 
   const weekCount = useMemo(() => getWeekCount(entries), [entries]);
   const sections = useMemo(() => groupEntries(entries), [entries]);
+
+  const quickStressCheckIn = async (intensity: number) => {
+    setWellnessMessage(null);
+    try {
+      const checkIn = await createStressCheckIn({
+        stressIntensity: intensity,
+      });
+      setLatestCheckIn(checkIn);
+      setWellnessMessage(
+        `Saved check-in (${intensity}/10). Suggested tool: ${interventionLabel(checkIn.recommendedTool)}.`
+      );
+    } catch (checkInError) {
+      setWellnessMessage(checkInError instanceof Error ? checkInError.message : 'Failed to save check-in.');
+    }
+  };
 
   if (!didAnimate.current && !loading) {
     didAnimate.current = true;
@@ -166,6 +204,29 @@ export default function HomeScreen() {
         onPress={() => router.push('/(tabs)/record')}
         left={<Ionicons name="pulse" size={spacing[20]} color={color.surface} />}
       />
+
+      {activeWorkspace === 'personal' ? (
+        <Card quiet>
+          <View style={styles.titleRow}>
+            <View style={styles.sectionHeaderBar} />
+            <Text variant="h2">Personal stress check-in</Text>
+          </View>
+          {nudgeMessage ? <InlineStatus tone="info" message={nudgeMessage} /> : null}
+          {latestCheckIn ? (
+            <Text variant="muted">
+              Latest: {latestCheckIn.stressIntensity}/10, {interventionLabel(latestCheckIn.recommendedTool)}.
+            </Text>
+          ) : (
+            <Text variant="muted">No stress check-ins yet this week.</Text>
+          )}
+          <View style={styles.quickCheckRow}>
+            <Button label="Low (3)" compact variant="secondary" onPress={() => void quickStressCheckIn(3)} />
+            <Button label="Medium (6)" compact variant="secondary" onPress={() => void quickStressCheckIn(6)} />
+            <Button label="High (9)" compact onPress={() => void quickStressCheckIn(9)} />
+          </View>
+          {wellnessMessage ? <InlineStatus tone="info" message={wellnessMessage} /> : null}
+        </Card>
+      ) : null}
 
       {loading && !entries.length ? <LoadingState label="Loading entries" rows={4} /> : null}
 
@@ -314,5 +375,10 @@ const styles = StyleSheet.create({
   },
   itemGap: {
     height: space.controlGap,
+  },
+  quickCheckRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.controlGap,
   },
 });

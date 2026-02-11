@@ -19,6 +19,7 @@ if (!OPENAI_API_KEY) {
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 const app = express();
 const router = express.Router();
+const personalRouter = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
@@ -179,9 +180,44 @@ router.post('/tags', requireAppToken, async (req, res) => {
   }
 });
 
+// Personal namespace scaffolding for sync/report flows.
+personalRouter.post('/sync/pull', requireAppToken, async (_req, res) => {
+  return res.json({
+    ok: true,
+    mode: 'local-placeholder',
+    pulled: 0,
+  });
+});
+
+personalRouter.post('/sync/push', requireAppToken, async (_req, res) => {
+  return res.json({
+    ok: true,
+    mode: 'local-placeholder',
+    pushed: 0,
+  });
+});
+
+personalRouter.post('/reports/weekly/pdf', requireAppToken, async (_req, res) => {
+  return res.status(501).json({
+    ok: false,
+    error: 'PDF report generation is not enabled in local server mode.',
+  });
+});
+
+personalRouter.post('/reports/share-link', requireAppToken, async (_req, res) => {
+  return res.json({
+    ok: true,
+    url: 'https://example.invalid/personal-report-link',
+    expiresInHours: 24,
+    mode: 'local-placeholder',
+  });
+});
+
 // Local/dev uses /ai/* and Vercel function paths use /api/ai/*.
 app.use('/ai', router);
 app.use('/api/ai', router);
+app.use('/v1/personal', personalRouter);
+app.use('/api/v1/personal', personalRouter);
 
 if (require.main === module) {
   app.listen(PORT, '0.0.0.0', () => {

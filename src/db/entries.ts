@@ -2,6 +2,7 @@ import { getDb, initDb } from '@/src/db/client';
 import type {
   AiStatus,
   CreateEntryInput,
+  DbOptions,
   Entry,
   EntryPatch,
   Tag,
@@ -81,9 +82,9 @@ LEFT JOIN entry_tags et ON et.entry_id = e.id
 LEFT JOIN tags t ON t.id = et.tag_id
 `;
 
-export async function createEntry({ audioUri, durationSec }: CreateEntryInput): Promise<Entry> {
-  await initDb();
-  const db = await getDb();
+export async function createEntry({ audioUri, durationSec }: CreateEntryInput, options: DbOptions = {}): Promise<Entry> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const id = makeId();
   const createdAt = Date.now();
@@ -99,7 +100,7 @@ export async function createEntry({ audioUri, durationSec }: CreateEntryInput): 
     Math.max(0, Math.round(durationSec))
   );
 
-  const entry = await getEntry(id);
+  const entry = await getEntry(id, options);
   if (!entry) {
     throw new Error('Failed to load created entry.');
   }
@@ -107,17 +108,17 @@ export async function createEntry({ audioUri, durationSec }: CreateEntryInput): 
   return entry;
 }
 
-export async function listEntries(): Promise<Entry[]> {
-  await initDb();
-  const db = await getDb();
+export async function listEntries(options: DbOptions = {}): Promise<Entry[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const rows = await db.getAllAsync<EntryRow>(`${ENTRY_SELECT} GROUP BY e.id ORDER BY e.created_at DESC;`);
   return rows.map(toEntry);
 }
 
-export async function getEntry(id: string): Promise<Entry | null> {
-  await initDb();
-  const db = await getDb();
+export async function getEntry(id: string, options: DbOptions = {}): Promise<Entry | null> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const row = await db.getFirstAsync<EntryRow>(`${ENTRY_SELECT} WHERE e.id = ? GROUP BY e.id LIMIT 1;`, id);
   return row ? toEntry(row) : null;
@@ -133,9 +134,9 @@ const PATCH_COLUMN_MAP: Record<keyof EntryPatch, string> = {
   errorMsg: 'error_msg',
 };
 
-export async function updateEntry(id: string, patch: EntryPatch): Promise<void> {
-  await initDb();
-  const db = await getDb();
+export async function updateEntry(id: string, patch: EntryPatch, options: DbOptions = {}): Promise<void> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const sets: string[] = [];
   const values: Array<string | number | null> = [];
@@ -158,16 +159,16 @@ export async function updateEntry(id: string, patch: EntryPatch): Promise<void> 
   await db.runAsync(`UPDATE entries SET ${sets.join(', ')} WHERE id = ?;`, ...values);
 }
 
-export async function deleteEntry(id: string): Promise<void> {
-  await initDb();
-  const db = await getDb();
+export async function deleteEntry(id: string, options: DbOptions = {}): Promise<void> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   await db.runAsync('DELETE FROM entries WHERE id = ?;', id);
 }
 
-export async function deleteAllEntries(): Promise<number> {
-  await initDb();
-  const db = await getDb();
+export async function deleteAllEntries(options: DbOptions = {}): Promise<number> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const countRow = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM entries;');
   const removed = countRow?.count ?? 0;
@@ -184,9 +185,9 @@ function normalizeTagName(name: string): string {
   return name.trim().replace(/\s+/g, ' ');
 }
 
-export async function createTag(name: string): Promise<Tag> {
-  await initDb();
-  const db = await getDb();
+export async function createTag(name: string, options: DbOptions = {}): Promise<Tag> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const clean = normalizeTagName(name);
   if (!clean) {
@@ -203,28 +204,28 @@ export async function createTag(name: string): Promise<Tag> {
   return { id, name: clean };
 }
 
-export async function listTags(): Promise<Tag[]> {
-  await initDb();
-  const db = await getDb();
+export async function listTags(options: DbOptions = {}): Promise<Tag[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   return db.getAllAsync<TagRow>('SELECT id, name FROM tags ORDER BY lower(name) ASC;');
 }
 
-export async function attachTag(entryId: string, tagId: string): Promise<void> {
-  await initDb();
-  const db = await getDb();
+export async function attachTag(entryId: string, tagId: string, options: DbOptions = {}): Promise<void> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
   await db.runAsync('INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?);', entryId, tagId);
 }
 
-export async function detachTag(entryId: string, tagId: string): Promise<void> {
-  await initDb();
-  const db = await getDb();
+export async function detachTag(entryId: string, tagId: string, options: DbOptions = {}): Promise<void> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
   await db.runAsync('DELETE FROM entry_tags WHERE entry_id = ? AND tag_id = ?;', entryId, tagId);
 }
 
-export async function searchEntries(query: string): Promise<Entry[]> {
-  await initDb();
-  const db = await getDb();
+export async function searchEntries(query: string, options: DbOptions = {}): Promise<Entry[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const q = `%${query.trim().toLowerCase()}%`;
   const rows = await db.getAllAsync<EntryRow>(
@@ -238,9 +239,9 @@ export async function searchEntries(query: string): Promise<Entry[]> {
   return rows.map(toEntry);
 }
 
-export async function listWeeklyCounts(): Promise<WeeklyCount[]> {
-  await initDb();
-  const db = await getDb();
+export async function listWeeklyCounts(options: DbOptions = {}): Promise<WeeklyCount[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const rows = await db.getAllAsync<{ week: string; count: number }>(
     `
@@ -254,9 +255,9 @@ export async function listWeeklyCounts(): Promise<WeeklyCount[]> {
   return rows.map((row) => ({ week: row.week, count: row.count }));
 }
 
-export async function listTopTags(limit = 10): Promise<TopTag[]> {
-  await initDb();
-  const db = await getDb();
+export async function listTopTags(limit = 10, options: DbOptions = {}): Promise<TopTag[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const rows = await db.getAllAsync<{ tag_id: string; tag_name: string; count: number }>(
     `
@@ -273,9 +274,9 @@ export async function listTopTags(limit = 10): Promise<TopTag[]> {
   return rows.map((row) => ({ tagId: row.tag_id, tagName: row.tag_name, count: row.count }));
 }
 
-export async function listEntriesWithSummary(): Promise<Entry[]> {
-  await initDb();
-  const db = await getDb();
+export async function listEntriesWithSummary(options: DbOptions = {}): Promise<Entry[]> {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const rows = await db.getAllAsync<EntryRow>(
     `${ENTRY_SELECT}
@@ -287,9 +288,9 @@ export async function listEntriesWithSummary(): Promise<Entry[]> {
   return rows.map(toEntry);
 }
 
-export async function exportJournalData() {
-  await initDb();
-  const db = await getDb();
+export async function exportJournalData(options: DbOptions = {}) {
+  await initDb(options.workspace);
+  const db = await getDb(options.workspace);
 
   const entries = await db.getAllAsync('SELECT * FROM entries ORDER BY created_at DESC;');
   const tags = await db.getAllAsync('SELECT * FROM tags ORDER BY lower(name) ASC;');
